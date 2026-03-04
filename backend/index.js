@@ -57,7 +57,6 @@ function buildGraph(geojson) {
   const SNAP_DISTANCE = 20; // meters
   const keys = Object.keys(graph);
 
-  // Collect all endpoints (nodes with only 1 connection = dead ends)
   const endpoints = keys.filter(k => graph[k].length === 1);
 
   endpoints.forEach(epKey => {
@@ -66,7 +65,6 @@ function buildGraph(geojson) {
       if (otherKey === epKey) return;
       const otherCoord = otherKey.split(",").map(Number);
       const dist = haversine(epCoord, otherCoord);
-      // Snap if within threshold and not already connected
       if (dist < SNAP_DISTANCE) {
         const alreadyConnected = graph[epKey].some(e => e.node === otherKey);
         if (!alreadyConnected) {
@@ -109,7 +107,6 @@ function dijkstra(graph, startKey, endKey) {
     }
   }
 
-  // Reconstruct path
   const path = [];
   let cur = endKey;
   while (cur) {
@@ -117,10 +114,10 @@ function dijkstra(graph, startKey, endKey) {
     cur = prev[cur];
   }
 
-  if (path[0] !== startKey) return null; // no path found
+  if (path[0] !== startKey) return null; 
 
   return {
-    path: path.map((key) => key.split(",").map(Number)), // back to [lon, lat]
+    path: path.map((key) => key.split(",").map(Number)), 
     distanceMeters: Math.round(dist[endKey]),
   };
 }
@@ -144,7 +141,7 @@ function nearestNode(graph, [lon, lat]) {
 const graph = buildGraph(geojson);
 console.log(`✅ Graph built: ${Object.keys(graph).length} nodes`);
 
-// ─── GET /nodes — returns all walkable nodes (for frontend map) ─
+// ─── GET /nodes ─────────────────────────────────────────
 app.get("/nodes", (req, res) => {
   const nodes = Object.keys(graph).map((key) => {
     const [lon, lat] = key.split(",").map(Number);
@@ -153,7 +150,7 @@ app.get("/nodes", (req, res) => {
   res.json({ count: nodes.length, nodes });
 });
 
-// ─── GET /paths — returns all walkable lines (for drawing blue paths) ─
+// ─── GET /paths ─────────────────────────────────────────
 app.get("/paths", (req, res) => {
   const paths = [];
   geojson.features.forEach((feature) => {
@@ -169,8 +166,6 @@ app.get("/paths", (req, res) => {
 });
 
 // ─── POST /route ────────────────────────────────────────
-// Body: { start: [lon, lat], end: [lon, lat] }
-// Returns: { path: [[lon,lat], ...], distanceMeters: number }
 app.post("/route", (req, res) => {
   const { start, end } = req.body;
 
@@ -184,10 +179,6 @@ app.post("/route", (req, res) => {
   const startKey = nearestNode(graph, start);
   const endKey   = nearestNode(graph, end);
 
-  // Debug log — check your backend terminal to see what's being snapped to
-  console.log("📍 Requested start:", start, "→ snapped to:", startKey);
-  console.log("📍 Requested end:  ", end,   "→ snapped to:", endKey);
-
   if (!startKey || !endKey) {
     return res.status(404).json({ error: "Could not find nearby path nodes" });
   }
@@ -198,11 +189,26 @@ app.post("/route", (req, res) => {
     return res.status(404).json({ error: "No route found between these points" });
   }
 
+  // --- Last Mile Stitching & ETA ---
+  const startToPathDist = haversine(start, startKey.split(",").map(Number));
+  const pathToEndDist = haversine(endKey.split(",").map(Number), end);
+  const totalDistance = Math.round(result.distanceMeters + startToPathDist + pathToEndDist);
+  
+  // Calculate ETA (Average walk speed ~ 1.4 m/s)
+  const walkingTimeMinutes = Math.ceil(totalDistance / 1.4 / 60);
+
+  const finalPath = [
+    start,              
+    ...result.path,     
+    end                 
+  ];
+
   res.json({
     start: startKey.split(",").map(Number),
     end:   endKey.split(",").map(Number),
-    path:  result.path,          // array of [lon, lat] pairs
-    distanceMeters: result.distanceMeters,
+    path:  finalPath,          
+    distanceMeters: totalDistance,
+    etaMinutes: walkingTimeMinutes // Sent to frontend
   });
 });
 
