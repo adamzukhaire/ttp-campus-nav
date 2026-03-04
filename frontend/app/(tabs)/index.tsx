@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Pla
 import MapView, { Marker, Polyline, MapPressEvent } from 'react-native-maps';
 import * as Location from 'expo-location';
 
-const API_URL = 'https://ttp-campus-nav.onrender.com';
+const API_URL = 'https://ttp-campus-nav-ke3j.onrender.com';
 
 const HEADERS = {
   'Content-Type': 'application/json',
