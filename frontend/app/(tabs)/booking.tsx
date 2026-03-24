@@ -1,70 +1,121 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet, View, Text, TouchableOpacity, FlatList,
-  Image, Modal, SafeAreaView, Alert, Platform
+  Image, SafeAreaView, Alert, ActivityIndicator
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useFocusEffect } from 'expo-router';
+import { supabase } from '../../lib/supabase'; // The database connection!
 
 const FACILITIES = [
-  { title: 'Study Room 101', location: 'Study Room', startHour: 10, endHour: 22, image: 'https://picsum.photos/200/200?random=1' },
-  { title: 'Sports Court', location: 'Sports Court', startHour: 10, endHour: 22, image: 'https://picsum.photos/200/200?random=2' },
-  { title: 'Lecture Hall B', location: 'Lecture Hall', startHour: 10, endHour: 22, image: 'https://picsum.photos/200/200?random=3' },
+  { id: '1', title: 'Study Room 101', startHour: 10, endHour: 22, image: 'https://picsum.photos/200/200?random=1' },
+  { id: '2', title: 'Sports Court', startHour: 10, endHour: 22, image: 'https://picsum.photos/200/200?random=2' },
+  { id: '3', title: 'Lecture Hall B', startHour: 10, endHour: 22, image: 'https://picsum.photos/200/200?random=3' },
 ];
 
+const SCHEDULE_HOURS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+
 export default function BookingPage() {
-  // Real Date object state
   const [date, setDate] = useState(new Date());
-  
-  // Picker visibility and mode states
-  const [mode, setMode] = useState('date');
+  const [mode, setMode] = useState('date' as any);
   const [showPicker, setShowPicker] = useState(false);
   
-  const [bookings, setBookings] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Handle Date/Time Selection
-  const onChange = (event, selectedDate) => {
-    // Hide picker on Android after selection. On iOS, we also hide it to mimic a modal.
-    setShowPicker(false); 
-    if (selectedDate) {
-      setDate(selectedDate);
+  // Formatters
+  const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const selectedHour = date.getHours();
+
+  const formatHourUI = (hour: number) => {
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+    return `${displayHour}${ampm}`;
+  };
+
+  // 1. Fetch real availability from Supabase for the selected date!
+  const fetchAvailability = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('facility_name, time_block')
+        .eq('booking_date', formattedDate) // Only get bookings for the day we are looking at
+        .eq('status', 'Confirmed'); // Only count it if it wasn't cancelled
+
+      if (error) throw error;
+      if (data) setBookings(data);
+    } catch (error) {
+      console.error("Error fetching availability:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const showMode = (currentMode) => {
+  // Trigger the fetch every time the user changes the Date, or switches back to this tab
+  useFocusEffect(
+    useCallback(() => {
+      fetchAvailability();
+    }, [formattedDate])
+  );
+
+  const onChange = (event: any, selectedDate?: Date) => {
+    setShowPicker(false);
+    if (selectedDate) setDate(selectedDate);
+  };
+
+  const showMode = (currentMode: string) => {
     setShowPicker(true);
     setMode(currentMode);
   };
 
-  // Formatters for display
-  const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-
-  const handleBook = (facility) => {
-    const isAlreadyBooked = bookings.some(
-      b => b.title === facility.title && b.date === formattedDate && b.time === formattedTime
-    );
-    
-    if (isAlreadyBooked) {
-      Alert.alert('Unavailable', 'This specific slot is already booked ❌');
-      return;
+  // 2. The Upgraded Booking Logic
+  const handleBook = async (facility: any) => {
+    // Prevent booking if they are trying to book in the past (optional, but good practice!)
+    if (date < new Date(new Date().setHours(0,0,0,0))) {
+      return Alert.alert('Invalid Date', 'You cannot book a facility in the past.');
     }
-    
-    setBookings([...bookings, { ...facility, date: formattedDate, time: formattedTime }]);
-    Alert.alert('Success 🎉', `${facility.title} booked for ${formattedDate} at ${formattedTime}.`);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return Alert.alert('Error', 'You must be logged in.');
+
+      // Double-check the UI hasn't lied to us
+      const isAlreadyBooked = bookings.some(
+        b => b.facility_name === facility.title && parseInt(b.time_block, 10) === selectedHour
+      );
+      if (isAlreadyBooked) return Alert.alert('Unavailable', 'This slot was just taken! ❌');
+
+      // Send to Database
+      const { error } = await supabase.from('bookings').insert({
+        user_id: user.id,
+        facility_name: facility.title,
+        booking_date: formattedDate,
+        time_block: selectedHour.toString(),
+        status: 'Confirmed'
+      });
+
+      if (error) throw error;
+
+      Alert.alert('Success 🎉', `${facility.title} booked for ${formatHourUI(selectedHour)}.`);
+      
+      // 3. Instantly refresh the dots to show the new booking!
+      fetchAvailability(); 
+
+    } catch (error: any) {
+      Alert.alert('Booking Failed', error.message);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.appBar}>
-        <Text style={styles.appBarTitle}>Booking</Text>
-        <TouchableOpacity onPress={() => setShowHistory(true)}>
-          <MaterialIcons name="history" size={28} color="#1F2937" />
-        </TouchableOpacity>
+        <Text style={styles.appBarTitle}>Book a Facility</Text>
+        {loading && <ActivityIndicator color="#2563EB" />}
       </View>
 
-      {/* Date & Time Filters */}
       <View style={styles.filters}>
         <TouchableOpacity style={styles.filterBox} onPress={() => showMode('date')}>
           <MaterialIcons name="calendar-today" size={16} color="#4B5563" style={{ marginRight: 8 }} />
@@ -77,7 +128,6 @@ export default function BookingPage() {
         </TouchableOpacity>
       </View>
 
-      {/* The Native Picker */}
       {showPicker && (
         <DateTimePicker
           value={date}
@@ -85,64 +135,69 @@ export default function BookingPage() {
           is24Hour={false}
           display="default"
           onChange={onChange}
-          minimumDate={new Date()} // Prevents booking in the past
+          minimumDate={new Date()}
         />
       )}
 
       <FlatList
         data={FACILITIES}
         contentContainerStyle={styles.list}
-        keyExtractor={item => item.title}
+        keyExtractor={item => item.id}
         renderItem={({ item }) => {
-          // Check if booked for the CURRENTLY selected date and time
-          const isBooked = bookings.some(b => b.title === item.title && b.date === formattedDate && b.time === formattedTime);
+          // Check database data instead of local data
+          const isCurrentSelectionBooked = bookings.some(
+            b => b.facility_name === item.title && parseInt(b.time_block, 10) === selectedHour
+          );
           
           return (
             <View style={styles.card}>
-              <Image source={{ uri: item.image }} style={styles.cardImage} />
-              <View style={styles.cardBody}>
-                <Text style={styles.cardTitle}>{item.title}</Text>
-                <Text style={styles.cardSubtitle}>Available: {item.startHour}:00 - {item.endHour}:00</Text>
-                <TouchableOpacity
-                  style={[styles.button, isBooked && styles.buttonDisabled]}
-                  onPress={() => handleBook(item)}
-                  disabled={isBooked}
-                >
-                  <Text style={[styles.buttonText, isBooked && styles.buttonTextDisabled]}>
-                    {isBooked ? 'Booked' : 'Book Now'}
-                  </Text>
-                </TouchableOpacity>
+              <View style={styles.cardTop}>
+                <Image source={{ uri: item.image }} style={styles.cardImage} />
+                <View style={styles.cardBody}>
+                  <Text style={styles.cardTitle}>{item.title}</Text>
+                  <Text style={styles.cardSubtitle}>Available: {item.startHour}:00 - {item.endHour}:00</Text>
+                  
+                  <TouchableOpacity
+                    style={[styles.button, isCurrentSelectionBooked && styles.buttonDisabled]}
+                    onPress={() => handleBook(item)}
+                    disabled={isCurrentSelectionBooked}
+                  >
+                    <Text style={[styles.buttonText, isCurrentSelectionBooked && styles.buttonTextDisabled]}>
+                      {isCurrentSelectionBooked ? 'Slot Taken' : 'Book Now'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.scheduleContainer}>
+                <Text style={styles.scheduleLabel}>Availability for {formattedDate}:</Text>
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={SCHEDULE_HOURS}
+                  keyExtractor={(hour) => hour.toString()}
+                  renderItem={({ item: hour }) => {
+                    // Make the timeline dots react to the Supabase data!
+                    const isSlotBooked = bookings.some(
+                      b => b.facility_name === item.title && parseInt(b.time_block, 10) === hour
+                    );
+
+                    return (
+                      <View style={styles.hourSlot}>
+                        <View style={[
+                          styles.statusDot, 
+                          { backgroundColor: isSlotBooked ? '#EF4444' : '#10B981' }
+                        ]} />
+                        <Text style={styles.hourText}>{formatHourUI(hour)}</Text>
+                      </View>
+                    );
+                  }}
+                />
               </View>
             </View>
           );
         }}
       />
-
-      {/* History Modal */}
-      <Modal visible={showHistory} animationType="slide" onRequestClose={() => setShowHistory(false)}>
-        <SafeAreaView style={styles.container}>
-          <View style={styles.appBar}>
-            <TouchableOpacity onPress={() => setShowHistory(false)}>
-              <MaterialIcons name="arrow-back" size={24} color="#1F2937" />
-            </TouchableOpacity>
-            <Text style={[styles.appBarTitle, { marginLeft: 16 }]}>My Bookings</Text>
-          </View>
-          {bookings.length === 0 ? (
-            <View style={styles.emptyState}><Text>No bookings yet</Text></View>
-          ) : (
-            <FlatList
-              data={bookings}
-              keyExtractor={(item, index) => index.toString()}
-              renderItem={({ item }) => (
-                <View style={styles.historyListItem}>
-                  <Text style={styles.cardTitle}>{item.title}</Text>
-                  <Text style={styles.cardSubtitle}>{item.date} at {item.time}</Text>
-                </View>
-              )}
-            />
-          )}
-        </SafeAreaView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -154,16 +209,20 @@ const styles = StyleSheet.create({
   filters: { flexDirection: 'row', padding: 16, gap: 12, backgroundColor: '#FFF' },
   filterBox: { flex: 1, flexDirection: 'row', backgroundColor: '#F3F4F6', padding: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   filterText: { fontSize: 14, color: '#374151', fontWeight: '500' },
-  list: { padding: 16, gap: 16 },
-  card: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden' },
-  cardImage: { width: 100, height: 100 },
+  list: { padding: 16, gap: 16, paddingBottom: 40 },
+  card: { backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
+  cardTop: { flexDirection: 'row' },
+  cardImage: { width: 110, height: 110 },
   cardBody: { flex: 1, padding: 12, justifyContent: 'space-between' },
   cardTitle: { fontSize: 16, fontWeight: 'bold', color: '#1F2937' },
   cardSubtitle: { fontSize: 12, color: '#6B7280' },
-  button: { alignSelf: 'flex-end', backgroundColor: '#2563EB', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
+  button: { alignSelf: 'flex-start', backgroundColor: '#2563EB', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, marginTop: 8 },
   buttonDisabled: { backgroundColor: '#E5E7EB' },
   buttonText: { color: '#FFF', fontWeight: '600', fontSize: 12 },
   buttonTextDisabled: { color: '#9CA3AF' },
-  historyListItem: { backgroundColor: '#FFF', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' }
+  scheduleContainer: { padding: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#FAFAFA' },
+  scheduleLabel: { fontSize: 11, fontWeight: '700', color: '#6B7280', marginBottom: 10, textTransform: 'uppercase' },
+  hourSlot: { alignItems: 'center', marginRight: 16 },
+  statusDot: { width: 10, height: 10, borderRadius: 5, marginBottom: 6 },
+  hourText: { fontSize: 11, color: '#374151', fontWeight: '500' },
 });
