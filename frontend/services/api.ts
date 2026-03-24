@@ -11,6 +11,15 @@ export type RouteResult = {
   distanceMeters: number;
 };
 
+// NEW: TypeScript definition for the Places coming from your backend
+export type Place = {
+  name: string;
+  latitude: number;
+  longitude: number;
+  area: string;
+  icon: string;
+};
+
 // GET /paths — fetch all walkable path lines for drawing on map
 export async function fetchPaths(): Promise<Coordinate[][]> {
   const res = await fetch(`${API_URL}/paths`, { headers: HEADERS });
@@ -42,4 +51,12 @@ export async function fetchRoute(
   }));
 
   return { path, distanceMeters: data.distanceMeters };
+}
+
+// NEW: GET /places — fetch buildings, markers, and sports courts
+export async function fetchPlaces(): Promise<Place[]> {
+  const res = await fetch(`${API_URL}/places`, { headers: HEADERS });
+  if (!res.ok) throw new Error('Failed to fetch places');
+  const data = await res.json();
+  return data.places || [];
 }

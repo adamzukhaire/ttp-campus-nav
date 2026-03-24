@@ -205,6 +205,41 @@ app.post("/route", (req, res) => {
     distanceMeters: result.distanceMeters,
   });
 });
+// ─── GET /places — returns named buildings and markers ─
+app.get("/places", (req, res) => {
+  const places = [];
+  
+  geojson.features.forEach((feature) => {
+    // Only look at features that have a "name" property
+    if (feature.properties && feature.properties.name) {
+      let lat, lon;
+
+      // If it's a single point marker
+      if (feature.geometry.type === "Point") {
+        lon = feature.geometry.coordinates[0];
+        lat = feature.geometry.coordinates[1];
+      } 
+      // If it's a building (Polygon), just grab the first coordinate point to use as a pin
+      else if (feature.geometry.type === "Polygon") {
+        lon = feature.geometry.coordinates[0][0][0];
+        lat = feature.geometry.coordinates[0][0][1];
+      }
+
+      if (lat && lon) {
+        places.push({
+          name: feature.properties.name,
+          latitude: lat,
+          longitude: lon,
+          // Grab the type of building if it exists, otherwise default to "Campus Location"
+          area: feature.properties.building ? 'Building' : 'Campus Location',
+          icon: 'location-on' 
+        });
+      }
+    }
+  });
+
+  res.json({ places });
+});
 
 // ─── Start server ───────────────────────────────────────
 const PORT = process.env.PORT || 3000;
