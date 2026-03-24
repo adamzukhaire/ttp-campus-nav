@@ -44,13 +44,16 @@ export default function Index() {
   const [isSearching, setIsSearching] = useState(false);
 
   const { userLocation, devMode, toggleDevMode, moveDevLocation } = useLocation();
+
+  const mapRef = useRef<MapView>(null);
   
   const {
     passedRoute, remainingRoute,
     distance, loading, rerouting,
     startNavigation, resetNavigation,
     nextInstruction = "Head towards destination", 
-    turnIcon = "navigation" 
+    turnIcon = "navigation",
+    heading
   } = useNavigation(userLocation, destination);
 
   const joystickAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 }));
@@ -122,10 +125,22 @@ export default function Index() {
 
       if (distMeters <= 2) {
         handleReset();
-        Alert.alert('📍 You have arrived!', 'You have reached your destination.', [{ text: 'Awesome' }]);
+        Alert.alert('📍 You have arrived!', 'You have reached your destination.', [{ text: 'Awesome',onPress: () => handleReset() }]);
       }
     }
   }, [userLocation, destination]);
+  
+  // 🌟 3D Camera Tracking during navigation
+  useEffect(() => {
+    if (destination && userLocation && mapRef.current ) {
+      mapRef.current.animateCamera({
+        center: userLocation,
+        pitch: 65,        // Tilts into 3D GPS mode
+        heading: heading, // 🌟 Uses the exact angle from your hook!
+        zoom: 24.5          
+      }, { duration: 1000 });
+    }
+  }, [userLocation, destination, heading, devMode]);
 
   const handleMapPress = (e: MapPressEvent) => {
     if (isSearching) {
@@ -159,29 +174,52 @@ export default function Index() {
     setDestination(null);
     setPendingDest(null);
     resetNavigation();
+
+    // 🌟 Snap camera back to the normal 2D campus overview!
+    if (mapRef.current) {
+      mapRef.current.animateCamera({
+        center: CAMPUS_REGION,
+        pitch: 0,   // Flattens the 3D tilt
+        heading: 0, // Faces North again
+        zoom: 15.5  // Zooms out to see the whole campus
+      }, { duration: 1000 });
+    }
   };
 
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         style={styles.map}
         initialRegion={CAMPUS_REGION}
         onPress={handleMapPress}
         showsUserLocation={!devMode}
         followsUserLocation={false}
+        showsPointsOfInterest={false} // Hides default Apple/Google businesses
+        mapType="mutedStandard"
       >
-        {campusPaths.map((path, i) => (
-          <Polyline key={i} coordinates={path} strokeColor="#3b82f6" strokeWidth={3} lineJoin="round" />
+        {/* Only show the full network graph when DEV mode is ON */}
+        {devMode && campusPaths.map((path, i) => (
+          <Polyline 
+            key={i} 
+            coordinates={path} 
+            strokeColor="rgba(59, 130, 246, 0.5)" // Made it slightly transparent
+            strokeWidth={2} 
+            lineDashPattern={[5, 5]} // Makes it a dotted/dashed line!
+          />
         ))}
+
         {devMode && userLocation && (
           <Marker coordinate={userLocation} anchor={{ x: 0.5, y: 0.5 }}>
             <View style={styles.devDot} />
           </Marker>
         )}
+
         {pendingDest && <Marker coordinate={pendingDest} title="?" pinColor="orange" />}
         {destination && <Marker coordinate={destination} title="Destination" pinColor="red" />}
         {passedRoute.length > 1 && <Polyline coordinates={passedRoute} strokeColor="#94a3b8" strokeWidth={5} lineJoin="round" />}
         {remainingRoute.length > 1 && <Polyline coordinates={remainingRoute} strokeColor="#eab308" strokeWidth={5} lineJoin="round" />}
+
       </MapView>
 
       {!destination ? (
@@ -309,4 +347,5 @@ const styles = StyleSheet.create({
   hint: { color: '#f1f5f9', fontSize: 15, textAlign: 'center', fontWeight: '500' },
   resetBtn: { backgroundColor: '#ef4444', borderRadius: 12, paddingHorizontal: 30, paddingVertical: 12, width: '100%', alignItems: 'center' },
   resetText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  customPin: { backgroundColor: '#2563EB', padding: 6, borderRadius: 20, borderWidth: 2, borderColor: '#FFF', elevation: 4, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
 });

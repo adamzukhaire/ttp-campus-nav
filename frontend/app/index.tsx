@@ -63,7 +63,7 @@ export default function LoginScreen() {
           <View style={styles.logoCircle}>
             <MaterialIcons name="school" size={50} color="#FFF" />
           </View>
-          <Text style={styles.title}>CampusHub</Text>
+          <Text style={styles.title}>Path2GO</Text>
           <Text style={styles.subtitle}>Universiti Teknologi PETRONAS</Text>
         </View>
 

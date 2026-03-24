@@ -1,4 +1,4 @@
-// hooks/useNavigation.ts
+// hooks/use-navigation.ts
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Coordinate, RouteResult, fetchRoute } from '../services/api';
 
@@ -97,6 +97,7 @@ type UseNavigationResult = {
   rerouting: boolean;
   nextInstruction: string;
   turnIcon: string;
+  heading: number; // 🌟 NEW: Added heading to the type definition
   startNavigation: (from: Coordinate, to: Coordinate) => Promise<void>;
   resetNavigation: () => void;
 };
@@ -112,9 +113,10 @@ export function useNavigation(
   const [loading, setLoading]               = useState(false);
   const [rerouting, setRerouting]           = useState(false);
   
-  // Turn-by-Turn UI States
+  // Turn-by-Turn & Camera UI States
   const [nextInstruction, setNextInstruction] = useState('Calculating route...');
   const [turnIcon, setTurnIcon]               = useState('straight');
+  const [heading, setHeading]                 = useState(0); // 🌟 NEW: Heading state for 3D camera
 
   const isReroutingRef    = useRef(false);
   const lastRerouteRef    = useRef(0);
@@ -156,6 +158,7 @@ export function useNavigation(
     setRemainingRoute([]);
     setDistance(null);
     setNextInstruction('');
+    setHeading(0); // 🌟 NEW: Reset the camera angle when the route ends
     isReroutingRef.current = false;
     lastRerouteRef.current = 0;
   }, []);
@@ -184,6 +187,13 @@ export function useNavigation(
         setNextInstruction(upcomingTurn.text);
         setTurnIcon(upcomingTurn.icon);
       }
+    }
+
+    // 🌟 NEW: Calculate map rotation (heading) for the 3D camera
+    if (newRemaining.length >= 2) {
+      // Look slightly ahead on the path to make the camera rotation smooth
+      const lookAhead = newRemaining[Math.min(1, newRemaining.length - 1)];
+      setHeading(calculateBearing(userLocation, lookAhead));
     }
 
     // ─── Auto reroute ────────────────────────────────
@@ -224,6 +234,7 @@ export function useNavigation(
     route, passedRoute, remainingRoute,
     distance, loading, rerouting,
     nextInstruction, turnIcon,
+    heading, // 🌟 NEW: Export the heading variable!
     startNavigation, resetNavigation,
   };
 }
