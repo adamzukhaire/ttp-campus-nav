@@ -1,7 +1,7 @@
 // services/api.ts
 // All backend API calls live here — one place to update if the URL changes
 
-const API_URL = 'https://ttp-campus-nav.onrender.com';
+const API_URL = 'https://ttp-campus-nav-ke3j.onrender.com';
 const HEADERS = { 'Content-Type': 'application/json' };
 
 export type Coordinate = { latitude: number; longitude: number };
